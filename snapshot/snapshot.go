@@ -457,6 +457,19 @@ func (o *snapshotter) Mounts(ctx context.Context, key string) ([]mount.Mount, er
 				return nil, errors.Wrapf(err, "get parent snapshot info, parent key=%q", pKey)
 			}
 		}
+		// non-CRI runtimes (e.g. dockerd's containerd image store) insert a standard
+		// containerd "<id>-init" snapshot between the active rw layer and the image's
+		// meta (nydus-bootstrap) snapshot, so the immediate parent is NOT the meta layer.
+		// Walk the full ancestor chain to find it (CRI parents directly off the meta).
+		if !needRemoteMounts {
+			if mID, mInfo, ferr := o.findMetaLayer(ctx, key); ferr == nil && label.IsNydusMetaLayer(mInfo.Labels) {
+				if err = o.fs.WaitUntilReady(mID); err != nil {
+					return nil, errors.Wrapf(err, "mounts: snapshot %s is not ready, err: %v", mID, err)
+				}
+				needRemoteMounts = true
+				metaSnapshotID = mID
+			}
+		}
 	case snapshots.KindCommitted:
 	case snapshots.KindUnknown:
 	}
